@@ -3,7 +3,7 @@ Vespa Smart Trap AI module
 
 This development is using Espressif IoT Development Framework IDF (ESP-IDF)
 
-[Setup ESP-IDF for VSCode](..)
+[Setup ESP-IDF for VSCode](Setup_ESP_IDF_for_VSCode.md)
 
 ---
 
