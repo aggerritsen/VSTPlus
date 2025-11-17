@@ -1,0 +1,47 @@
+# T-SIM7080G-S3 Pin Layout (ESP32-S3)
+
+| Header | Pin | GPIO     | Function         | Additional Notes     |
+|-------:|----:|----------|------------------|-----------------------|
+| P1.1   | 3V3 |          | Power            |                      |
+| P1.2   | GND |          | Ground           |                      |
+| P1.3   |      | GPIO16  | U0CTS            | ADC2_CH5             |
+| P1.4   |      | GPIO17  | U1TXD            | ADC2_CH6             |
+| P1.5   |      | GPIO18  | U1RXD            | ADC2_CH7             |
+| P1.6   |      | GPIO08  | TOUCH08          | ADC1_CH7             |
+| P1.7   |      | GPIO03  | TOUCH03          | ADC1_CH2             |
+| P1.8   |      | GPIO46  |                  |                      |
+| P1.9   |      | GPIO09  | TOUCH09 / FSPIHD | ADC1_CH8             |
+| P1.10  |      | GPIO10  | TOUCH10 / FSPICS0| ADC1_CH9             |
+| P1.11  |      | GPIO11  | TOUCH11 / FSPID  | ADC1_CH10            |
+| P1.12  |      | GPIO12  | TOUCH12 / FSPICLK| ADC1_CH1             |
+| P1.13  |      | GPIO13  | TOUCH13 / FSPIQ  | ADC1_CH2             |
+| P1.14  |      | GPIO14  | TOUCH14 / FSPIWP | ADC1_CH3             |
+| P1.15  | GND |          | Ground           |                      |
+| P1.16  | DC5 |          | 1.4–3.7V Input   |                      |
+
+| Header | Pin | GPIO     | Function         | Additional Notes     |
+|-------:|----:|----------|------------------|-----------------------|
+| P2.1   | 3V3 |          | Power            |                      |
+| P2.2   | 3V3 |          | Power            |                      |
+| P2.3   |      | GPIO01  | TOUCH01          | ADC1_CH0             |
+| P2.4   |      | GPIO02  | TOUCH02          | ADC1_CH1             |
+| P2.5   |      | GPIO43  | CLK_OUT1         |                      |
+| P2.6   |      | GPIO44  | CLK_OUT2         |                      |
+| P2.7   |      | GPIO37  | FSPI_Q           |                      |
+| P2.8   |      | GPIO36  | FSPI_CLK         |                      |
+| P2.9   |      | GPIO35  | FSPI_D           |                      |
+| P2.10  |      | GPIO00  |                  |                      |
+| P2.11  |      | GPIO45  |                  |                      |
+| P2.12  |      | GPIO48  |                  |                      |
+| P2.13  |      | GPIO47  |                  |                      |
+| P2.14  |      | GPIO21  |                  |                      |
+| P2.15  | GND |          | Ground           |                      |
+| P2.16  | VSYS|          | 5V 0.5A Output   |                      |
+
+## SPI (FSPI) Mapping
+| Signal | GPIO |
+|--------|------|
+| MOSI (FSPID) | GPIO11 |
+| MISO (FSPIQ) | GPIO13 |
+| SCK  (FSPICLK) | GPIO12 |
+| CS   (FSPICS0) | GPIO10 |
