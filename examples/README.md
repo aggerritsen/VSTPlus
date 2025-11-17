@@ -1,8 +1,10 @@
-# ESP32-S3 Development Notes  
-## Lessons Learned from hello_world, PSRAM, and SDMMC on the LilyGO T-SIM7080G-S3
+# ESP32-S3 Development Notes
 
 This document summarizes all important discoveries, pitfalls, configuration requirements, and working solutions encountered while bringing up the ESP32-S3 (LILYGO T-SIM7080G-S3 board) using ESP-IDF.
 
+The snippets in this examples folder are taken from https://github.com/espressif/esp-idf and adapted for the T-SIM7080-S3 board
+
+### Lessons learned
 It covers:
 
 1. Environment setup lessons
