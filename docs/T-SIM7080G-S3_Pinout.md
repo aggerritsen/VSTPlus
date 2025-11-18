@@ -8,7 +8,7 @@
 | P1.4   |      | GPIO17  | U1TXD            | ADC2_CH6             |
 | P1.5   |      | GPIO18  | U1RXD            | ADC2_CH7             |
 | P1.6   |      | GPIO08  | TOUCH08          | ADC1_CH7             |
-| P1.7   |      | GPIO03  | TOUCH03          | ADC1_CH2             |
+| P1.7   | SDA  | GPIO03  | TOUCH03          | ADC1_CH2             |
 | P1.8   |      | GPIO46  |                  |                      |
 | P1.9   |      | GPIO09  | TOUCH09 / FSPIHD | ADC1_CH8             |
 | P1.10  |      | GPIO10  | TOUCH10 / FSPICS0| ADC1_CH9             |
@@ -25,7 +25,7 @@
 | P2.2   | 3V3 |          | Power            |                      |
 | P2.3   |      | GPIO01  | TOUCH01          | ADC1_CH0             |
 | P2.4   |      | GPIO02  | TOUCH02          | ADC1_CH1             |
-| P2.5   |      | GPIO43  | CLK_OUT1         |                      |
+| P2.5   | CLK  | GPIO43  | CLK_OUT1         |                      |
 | P2.6   |      | GPIO44  | CLK_OUT2         |                      |
 | P2.7   |      | GPIO37  | FSPI_Q           |                      |
 | P2.8   |      | GPIO36  | FSPI_CLK         |                      |
@@ -45,3 +45,30 @@
 | MISO (FSPIQ) | GPIO13 |
 | SCK  (FSPICLK) | GPIO12 |
 | CS   (FSPICS0) | GPIO10 |
+
+## PMU (Power Management Unit)
+| Signal | GPIO |
+|-----|------|
+| SDA | GPIO15 |
+| SCL | GPIO07 |
+| INT | GPIO06 |
+
+## Camera
+| Signal | GPIO |
+|-------|------|
+| Reset | GPIO18 |
+| XCLK  | GPIO08 |
+| SIOD  | GPIO02 |
+| SIOC  | GPIO01 |
+| VSYNC | GPIO16 |
+| HREF  | GPIO17 |
+| PCLK  | GPIO12 |
+| CMYK  |   -1   |
+|  Y9   | GPIO09 |
+|  Y8   | GPIO10 |
+|  Y7   | GPIO11 |
+|  Y6   | GPIO13 |
+|  Y5   | GPIO21 |
+|  Y4   | GPIO48 |
+|  Y3   | GPIO47 |
+|  Y2   | GPIO14 |

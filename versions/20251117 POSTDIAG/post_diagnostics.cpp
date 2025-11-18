@@ -25,7 +25,7 @@
 #include "driver/sdmmc_host.h"
 #include "driver/gpio.h"
 
-#include "driver/i2c_master.h"
+#include "driver/i2c.h"
 #include "driver/uart.h"
 #include "esp_timer.h"
 
@@ -45,15 +45,9 @@ static const char* TAG = "POST";
 #define POST_SD_D0_GPIO    GPIO_NUM_40
 
 // ---- I2C probe config (based on your header) ----
-//#define POST_I2C_PORT      I2C_NUM_0
-//#define POST_I2C_SDA_GPIO  GPIO_NUM_8    // P1.6 GPIO08
-//#define POST_I2C_SCL_GPIO  GPIO_NUM_9    // P1.9 GPIO09
-//#define POST_I2C_FREQ_HZ   100000
-
-// ---- I2C probe config (NEW, camera-safe) ----
 #define POST_I2C_PORT      I2C_NUM_0
-#define POST_I2C_SDA_GPIO  GPIO_NUM_3    // P1.7
-#define POST_I2C_SCL_GPIO  GPIO_NUM_43   // P2.5
+#define POST_I2C_SDA_GPIO  GPIO_NUM_8    // P1.6 GPIO08
+#define POST_I2C_SCL_GPIO  GPIO_NUM_9    // P1.9 GPIO09
 #define POST_I2C_FREQ_HZ   100000
 
 // ---- Modem UART config (from your pin table) ----
@@ -153,48 +147,53 @@ static void post_test_modem(void)
 
 static void post_test_i2c(void)
 {
-    post_log("I2C: scanning bus on SDA=%d, SCL=%d",
-             POST_I2C_SDA_GPIO, POST_I2C_SCL_GPIO);
+    post_log("I2C: scanning bus on SDA=%d, SCL=%d", POST_I2C_SDA_GPIO, POST_I2C_SCL_GPIO);
 
-    i2c_master_bus_handle_t bus = nullptr;
+    i2c_config_t conf = {};
+    conf.mode = I2C_MODE_MASTER;
+    conf.sda_io_num = POST_I2C_SDA_GPIO;
+    conf.scl_io_num = POST_I2C_SCL_GPIO;
+    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+    conf.master.clk_speed = POST_I2C_FREQ_HZ;
 
-    i2c_master_bus_config_t bus_cfg = {};
-    bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
-    bus_cfg.i2c_port = I2C_NUM_0;                 // controller 0
-    bus_cfg.sda_io_num = POST_I2C_SDA_GPIO;
-    bus_cfg.scl_io_num = POST_I2C_SCL_GPIO;
-    bus_cfg.glitch_ignore_cnt = 7;                // small default, not too critical
-    bus_cfg.flags.enable_internal_pullup = true;  // use internal pull-ups
+    esp_err_t err;
 
-    esp_err_t err = i2c_new_master_bus(&bus_cfg, &bus);
+    err = i2c_param_config(POST_I2C_PORT, &conf);
     if (err != ESP_OK) {
-        post_log("I2C: i2c_new_master_bus failed: %s", esp_err_to_name(err));
+        post_log("I2C: i2c_param_config failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = i2c_driver_install(POST_I2C_PORT, conf.mode, 0, 0, 0);
+    if (err != ESP_OK) {
+        post_log("I2C: i2c_driver_install failed: %s", esp_err_to_name(err));
         return;
     }
 
     bool any = false;
+    for (uint8_t addr = 1; addr < 127; ++addr) {
+        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+        i2c_master_start(cmd);
+        // 7-bit address, write bit = 0
+        i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
+        i2c_master_stop(cmd);
 
-    // Standard 7-bit I2C address space 0x08..0x77
-    for (uint8_t addr = 0x08; addr <= 0x77; ++addr) {
-        err = i2c_master_probe(bus, addr, 50 /* timeout ms */);
+        err = i2c_master_cmd_begin(POST_I2C_PORT, cmd, 10 / portTICK_PERIOD_MS);
+        i2c_cmd_link_delete(cmd);
+
         if (err == ESP_OK) {
             post_log("I2C: found device at 0x%02X", addr);
             any = true;
         }
-        // We deliberately ignore ESP_ERR_TIMEOUT / ESP_FAIL details here
     }
 
     if (!any) {
         post_log("I2C: no devices found");
     }
 
-    // Clean up the bus
-    err = i2c_del_master_bus(bus);
-    if (err != ESP_OK) {
-        post_log("I2C: i2c_del_master_bus failed: %s", esp_err_to_name(err));
-    }
+    i2c_driver_delete(POST_I2C_PORT);
 }
-
 
 static void post_test_gpio(void)
 {
@@ -267,11 +266,11 @@ static void post_write_to_sd(void)
     sdmmc_card_t* card = nullptr;
 
     esp_vfs_fat_mount_config_t mount_config = {};
-    mount_config.format_if_mount_failed   = true;          // Set to true to auto-format SD if mount fails
-    mount_config.max_files                = 10;            // Safe for camera + AI + logs
-    mount_config.allocation_unit_size     = 16 * 1024;     // FAT allocation unit (16 KB recommended for SD wear & performance)
-    mount_config.disk_status_check_enable = false;         // Disable periodic card polling (saves power)
-    mount_config.use_one_fat              = false;         // Use both FATs (standard FAT filesystem behavior)
+    mount_config.format_if_mount_failed    = false;        // or true, if you want auto-format
+    mount_config.max_files                = 5;
+    mount_config.allocation_unit_size     = 16 * 1024;     // matches our docs
+    mount_config.disk_status_check_enable = false;         // disable extra card polling
+    mount_config.use_one_fat              = false;         // normal FAT behaviour
 
     // Host configuration: SDMMC slot 1, modest speed
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();

@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS
-       "main.cpp"
+        "main.c"
         "post_diagnostics.cpp"
     INCLUDE_DIRS "."
     PRIV_REQUIRES
@@ -14,5 +14,4 @@ idf_component_register(
         vfs
         esp_timer
         esp_driver_uart
-        esp_driver_i2c
 )
