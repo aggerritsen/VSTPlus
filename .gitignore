@@ -3,3 +3,5 @@ sdkconfig
 sdkconfig.*
 .devcontainer/
 .vscode/
+managed_components
+examples/
