@@ -51,7 +51,7 @@ static const char* TAG = "POST";
 //#define POST_I2C_FREQ_HZ   100000
 
 // ---- I2C probe config (NEW, camera-safe) ----
-#define POST_I2C_PORT      I2C_NUM_0
+#define POST_I2C_PORT      I2C_NUM_1
 #define POST_I2C_SDA_GPIO  GPIO_NUM_3    // P1.7
 #define POST_I2C_SCL_GPIO  GPIO_NUM_43   // P2.5
 #define POST_I2C_FREQ_HZ   100000

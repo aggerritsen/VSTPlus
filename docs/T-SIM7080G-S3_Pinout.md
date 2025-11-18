@@ -72,3 +72,12 @@
 |  Y4   | GPIO48 |
 |  Y3   | GPIO47 |
 |  Y2   | GPIO14 |
+
+## Modem
+| Signal |  GPIO  |
+|-------|------|
+|  PWR  | GPIO41 |
+|  DTR  | GPIO42 |
+|  RI   | GPIO03 |
+|  RXD  | GPIO04 |
+|  TXD  | GPIO05 |
