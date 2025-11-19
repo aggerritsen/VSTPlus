@@ -16,4 +16,6 @@ This development is using Espressif IoT Development Framework IDF (ESP-IDF)
 
 [POST and Debug Documentation](docs/Post_and_Debug_Documentation.md)
 
+[I2C Architecture](docs/I2C_Architecture_TSIM7080G.md)
+
 [VTSPlus Development Notes](docs/VSTPlus_Development_Notes.md)
