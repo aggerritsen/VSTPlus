@@ -18,4 +18,6 @@ This development is using Espressif IoT Development Framework IDF (ESP-IDF)
 
 [I2C Architecture](docs/I2C_Architecture_TSIM7080G.md)
 
+[AW9523 expander (traffic light)](docs/aw9523_traffic_light_devnote.md)
+
 [VTSPlus Development Notes](docs/VSTPlus_Development_Notes.md)
