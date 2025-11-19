@@ -1,0 +1,53 @@
+REG 90：LDOS ON/OFF control 0
+Bit Description R/W Reset Default
+7
+dldo1 enable
+0: disable 1: enable
+RW
+System
+Reset
+EFUSE
+6
+cpusldo enable
+0: disable 1: enable
+RW
+System
+Reset
+EFUSE
+5 bldo2 enable RW System EFUSE
+0: disable 1: enable Reset
+4
+aldo1 enable
+0: disable 1: enable
+RW
+System
+Reset
+EFUSE
+3
+aldo4 enable
+0: disable 1: enable
+RW
+System
+Reset
+EFUSE
+2
+aldo3 enable
+0: disable 1: enable
+RW
+System
+Reset
+EFUSE
+1
+aldo2 enable
+0: disable 1: enable
+RW
+System
+Reset
+EFUSE
+0
+aldo1 enable
+0: disable 1: enable
+RW
+System
+Reset
+EFUSE

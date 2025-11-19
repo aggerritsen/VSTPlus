@@ -5,7 +5,7 @@
  *
  * - Logs chip / flash / PSRAM / heap info to the serial console
  * - Scans I2C bus for devices
- * - Brings up the SIM7080 modem power (via AXP2101 PMU) and checks AT response
+ * - Brings up the SIM7080 modem power (via PMU stub) and checks AT response
  * - Attempts to mount SD card on SDMMC host slot 1 (1-bit bus, GPIO 38/39/40)
  * - Writes diagnostics to /sdcard/boot_diagnostics.txt on success
  */
@@ -26,7 +26,7 @@
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
-#include "driver/i2c_master.h"
+#include "driver/i2c.h"
 #include "driver/sdmmc_host.h"
 #include "driver/sdmmc_defs.h"
 #include "sdmmc_cmd.h"
@@ -34,8 +34,8 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "pmu_debug.h"
 
-#include "pmu_debug.h"           // shared AXP2101 access + debug dump
 
 static const char *TAG = "POST";
 #define TAG_POST TAG
@@ -45,8 +45,11 @@ static const char *TAG = "POST";
 // -----------------------------------------------------------------------------
 
 // ----- PMU (AXP2101) on T-SIM7080G-S3 -----
-// PMU I2C is on I2C_NUM_0, SDA=15, SCL=7, INT=6
+// DCDC control and DCDC3 voltage (op basis van AXP2101 datasheet + dumps)
+#define AXP2101_REG_DCDC_ONOFF    0x80   // DCDCS ON/OFF and DVM control
+#define AXP2101_REG_DCDC3_VOLT    0x84   // DCDC3 voltage setting
 
+// PMU I2C is on I2C_NUM_0, SDA=15, SCL=7, INT=6
 #define POST_PMU_I2C_PORT   I2C_NUM_0
 #define POST_PMU_SDA_GPIO   GPIO_NUM_15   // PMU SDA
 #define POST_PMU_SCL_GPIO   GPIO_NUM_7    // PMU SCL
@@ -55,9 +58,11 @@ static const char *TAG = "POST";
 // AXP2101 TWSI 7-bit address: 0b0110100 = 0x34
 #define AXP2101_I2C_ADDR    0x34
 
-// Registers we use
+// Registers we actually use (from AXP2101 register map)
 #define AXP2101_REG_LDO_ONOFF0   0x90   // LDO ON/OFF control 0, bit5 = BLDO2 enable
 #define AXP2101_REG_BLDO2_VOLT   0x97   // BLDO2 voltage setting
+//  bits4:0 = BLDO2 voltage code: 0.5V + 0.1V*code (0..30)
+//  3.3V => code = (3.3 - 0.5) / 0.1 = 28 = 0b11100
 
 // SD card configuration: SDMMC host slot 1, 1-bit bus on 38/39/40
 #define POST_MOUNT_POINT   "/sdcard"
@@ -67,7 +72,7 @@ static const char *TAG = "POST";
 #define POST_SD_CMD_GPIO   GPIO_NUM_39
 #define POST_SD_D0_GPIO    GPIO_NUM_40
 
-// I2C probe configuration (camera-safe bus for external sensors, new driver)
+// I2C probe configuration (camera-safe bus for external sensors)
 #define POST_I2C_PORT      I2C_NUM_1
 #define POST_I2C_SDA_GPIO  GPIO_NUM_3
 #define POST_I2C_SCL_GPIO  GPIO_NUM_43
@@ -104,8 +109,11 @@ static const char *TAG = "POST";
 static char   s_diag_buf[POST_MAX_DIAG_LEN];
 static size_t s_diag_len = 0;
 
+// Forward declaration so we can use post_log earlier in the file
+static void post_log(const char *fmt, ...);
+
 // -----------------------------------------------------------------------------
-// Small helper for GPIO tests (optional)
+// Small helper for GPIO tests (currently mostly a placeholder)
 // -----------------------------------------------------------------------------
 
 typedef struct {
@@ -121,29 +129,103 @@ static const post_gpio_test_t s_gpio_tests[] = {
 };
 
 // -----------------------------------------------------------------------------
-// PMU helpers (AXP2101 via new driver, shared with pmu_debug)
+// PMU helpers (AXP2101 over I2C0)
 // -----------------------------------------------------------------------------
 
-/**
- * Enable BLDO2 at 3.3V to power the SIM7080G modem.
- * Uses axp2101_*() from pmu_debug.cpp (new i2c_master driver).
- */
+static bool s_pmu_i2c_inited = false;
+
+static esp_err_t axp2101_i2c_init(void)
+{
+    if (s_pmu_i2c_inited) {
+        return ESP_OK;
+    }
+
+    i2c_config_t conf = {};
+    conf.mode = I2C_MODE_MASTER;
+    conf.sda_io_num = POST_PMU_SDA_GPIO;
+    conf.scl_io_num = POST_PMU_SCL_GPIO;
+    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+    conf.master.clk_speed = POST_PMU_I2C_FREQ;
+
+    esp_err_t err = i2c_param_config(POST_PMU_I2C_PORT, &conf);
+    if (err != ESP_OK) {
+        post_log("PMU: i2c_param_config failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = i2c_driver_install(POST_PMU_I2C_PORT, conf.mode, 0, 0, 0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        post_log("PMU: i2c_driver_install failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    s_pmu_i2c_inited = true;
+    return ESP_OK;
+}
+
+static esp_err_t axp2101_write_reg(uint8_t reg, uint8_t value)
+{
+    esp_err_t err = axp2101_i2c_init();
+    if (err != ESP_OK) return err;
+
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (AXP2101_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, reg, true);
+    i2c_master_write_byte(cmd, value, true);
+    i2c_master_stop(cmd);
+
+    err = i2c_master_cmd_begin(POST_PMU_I2C_PORT, cmd, pdMS_TO_TICKS(100));
+    i2c_cmd_link_delete(cmd);
+    if (err != ESP_OK) {
+        post_log("PMU: write reg 0x%02X failed: %s", reg, esp_err_to_name(err));
+    }
+    return err;
+}
+
+static esp_err_t axp2101_read_reg(uint8_t reg, uint8_t *value)
+{
+    esp_err_t err = axp2101_i2c_init();
+    if (err != ESP_OK) return err;
+
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+
+    // Write register address
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (AXP2101_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, reg, true);
+
+    // Read 1 byte
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (AXP2101_I2C_ADDR << 1) | I2C_MASTER_READ, true);
+    i2c_master_read_byte(cmd, value, I2C_MASTER_NACK);
+    i2c_master_stop(cmd);
+
+    err = i2c_master_cmd_begin(POST_PMU_I2C_PORT, cmd, pdMS_TO_TICKS(100));
+    i2c_cmd_link_delete(cmd);
+    if (err != ESP_OK) {
+        post_log("PMU: read reg 0x%02X failed: %s", reg, esp_err_to_name(err));
+    }
+    return err;
+}
+
 static esp_err_t post_pmu_enable_modem_rails(void)
 {
     ESP_LOGI(TAG_POST, "PMU: configuring AXP2101 on SDA=%d, SCL=%d for modem power",
              POST_PMU_SDA_GPIO, POST_PMU_SCL_GPIO);
 
-    esp_err_t err;
+    esp_err_t err = ESP_OK;
 
-    // 1) Set BLDO2 voltage to ~3.3V
-    const uint8_t bldo2_code_3v3 = 0x1C; // 3.3V => code 28 => 0b11100
+    // 1) BLDO2 op ~3.3 V zetten (zoals in je dumps: REG 0x97 = 0x1C)
+    const uint8_t bldo2_code_3v3 = 0x1C; // 3.3V => code 28
     err = axp2101_write_reg(AXP2101_REG_BLDO2_VOLT, bldo2_code_3v3);
     if (err != ESP_OK) {
         ESP_LOGE(TAG_POST, "PMU: write BLDO2 voltage (0x%02X) failed", AXP2101_REG_BLDO2_VOLT);
         return err;
     }
 
-    // 2) Enable BLDO2 in LDO ON/OFF control 0 (bit5 = 1)
+    // LDO_ONOFF0 (REG 0x90): bit5 = BLDO2 enable, rest laten we ongemoeid.
     uint8_t ldo_onoff0 = 0;
     err = axp2101_read_reg(AXP2101_REG_LDO_ONOFF0, &ldo_onoff0);
     if (err != ESP_OK) {
@@ -151,14 +233,49 @@ static esp_err_t post_pmu_enable_modem_rails(void)
         return err;
     }
 
-    ldo_onoff0 |= (1 << 5);  // BLDO2 enable
+    ldo_onoff0 |= (1 << 5);  // BLDO2 aan
     err = axp2101_write_reg(AXP2101_REG_LDO_ONOFF0, ldo_onoff0);
     if (err != ESP_OK) {
         ESP_LOGE(TAG_POST, "PMU: write LDO_ONOFF0 (0x%02X) failed", AXP2101_REG_LDO_ONOFF0);
         return err;
     }
 
-    ESP_LOGI(TAG_POST, "PMU: BLDO2 3.3V enabled to power modem (DCDC3 left as configured by bootloader)");
+    // 2) DCDC3 aanzetten en op ~3.0 V zetten, zoals in de "goede" dump:
+    //
+    //  - REG 0x80: DCDCS ON/OFF
+    //      * in slechte state: 0x19 (DCDC1,4,5 aan)
+    //      * in goede  state: 0x1D (DCDC1,3,4,5 aan)
+    //    -> we zetten bit2 (DCDC3 enable) erbij.
+    //
+    //  - REG 0x84: DCDC3 voltage
+    //      * in goede state: 0x66  ≈ 3.0 V
+    uint8_t dcdc_onoff = 0;
+    err = axp2101_read_reg(AXP2101_REG_DCDC_ONOFF, &dcdc_onoff);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_POST, "PMU: read DCDC_ONOFF (0x%02X) failed", AXP2101_REG_DCDC_ONOFF);
+        return err;
+    }
+
+    // Zet bit2 (DCDC3 enable) hoog, laat de rest zoals hij was.
+    dcdc_onoff |= (1 << 2);
+
+    err = axp2101_write_reg(AXP2101_REG_DCDC_ONOFF, dcdc_onoff);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_POST, "PMU: write DCDC_ONOFF (0x%02X) failed", AXP2101_REG_DCDC_ONOFF);
+        return err;
+    }
+
+    // DCDC3 voltage naar 0x66 (≈ 3.0V), exact zoals in je werkende dump.
+    err = axp2101_write_reg(AXP2101_REG_DCDC3_VOLT, 0x66);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_POST, "PMU: write DCDC3 voltage (0x%02X) failed", AXP2101_REG_DCDC3_VOLT);
+        return err;
+    }
+
+    ESP_LOGI(TAG_POST,
+             "PMU: BLDO2 3.3V enabled, DCDC3 enabled at ~3.0V (DCDC_ONOFF=0x%02X)",
+             dcdc_onoff);
+
     return ESP_OK;
 }
 
@@ -166,10 +283,15 @@ static esp_err_t post_pmu_enable_modem_rails(void)
 // Logging helpers
 // -----------------------------------------------------------------------------
 
+/**
+ * @brief Append formatted diagnostics text to the in-memory buffer
+ *        and log it to ESP logging.
+ */
 static void post_log(const char *fmt, ...)
 {
     va_list ap;
 
+    // Format into a local line buffer first
     char line[256];
     va_start(ap, fmt);
     int n = vsnprintf(line, sizeof(line), fmt, ap);
@@ -179,10 +301,13 @@ static void post_log(const char *fmt, ...)
         return;
     }
 
+    // Ensure null-termination
     line[sizeof(line) - 1] = '\0';
 
+    // Log to normal ESP log (info-level)
     ESP_LOGI(TAG, "%s", line);
 
+    // Append to diagnostics buffer (with newline)
     if (s_diag_len < POST_MAX_DIAG_LEN - 2) {
         size_t copy_len = strnlen(line, sizeof(line));
         if (copy_len > POST_MAX_DIAG_LEN - 2 - s_diag_len) {
@@ -197,10 +322,13 @@ static void post_log(const char *fmt, ...)
     }
 }
 
+/**
+ * @brief Reset the diagnostics buffer.
+ */
 static void post_reset_buffer(void)
 {
-    s_diag_len    = 0;
-    s_diag_buf[0] = '\0';
+    s_diag_len       = 0;
+    s_diag_buf[0]    = '\0';
 }
 
 // -----------------------------------------------------------------------------
@@ -211,6 +339,7 @@ static void post_dump_system_info(void)
 {
     post_log("=== Power-On Self Test (POST) ===");
 
+    // Approximate boot time
     std::time_t now = std::time(nullptr);
     std::tm tm_info{};
     if (localtime_r(&now, &tm_info) != nullptr) {
@@ -221,6 +350,7 @@ static void post_dump_system_info(void)
         post_log("Boot time (approx): <unknown>");
     }
 
+    // Chip information
     esp_chip_info_t chip_info;
     esp_chip_info(&chip_info);
 
@@ -239,12 +369,14 @@ static void post_dump_system_info(void)
     post_log("Chip model: %s, %d core(s), revision %d",
              chip_model_str, chip_info.cores, chip_info.revision);
 
+    // Features
     post_log("Features: %s%s%s%s",
              (chip_info.features & CHIP_FEATURE_WIFI_BGN) ? "WiFi " : "",
              (chip_info.features & CHIP_FEATURE_BLE)       ? "/ BLE " : "",
              (chip_info.features & CHIP_FEATURE_BT)        ? "/ BT "  : "",
              (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "/ Embedded flash" : "");
 
+    // Flash size
     uint32_t flash_size = 0;
     if (esp_flash_get_size(nullptr, &flash_size) == ESP_OK) {
         post_log("Flash size: %u bytes (%.2f MB)",
@@ -254,6 +386,7 @@ static void post_dump_system_info(void)
         post_log("Flash size: <unknown>");
     }
 
+    // PSRAM
     size_t psram_size = esp_psram_get_size();
     if (psram_size > 0) {
         post_log("PSRAM: present, %u bytes (%.2f MB)",
@@ -263,6 +396,7 @@ static void post_dump_system_info(void)
         post_log("PSRAM: not present");
     }
 
+    // Heap stats
     multi_heap_info_t heap_info{};
     heap_caps_get_info(&heap_info, MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT);
     post_log("Internal heap: free=%u, largest_block=%u",
@@ -277,54 +411,60 @@ static void post_dump_system_info(void)
     }
 }
 
+// -----------------------------------------------------------------------------
+// I2C probe
+// -----------------------------------------------------------------------------
+
 static void post_test_i2c(void)
 {
-    post_log("I2C: scanning bus on SDA=%d, SCL=%d (new driver, full scan)",
+    post_log("I2C: scanning bus on SDA=%d, SCL=%d",
              (int)POST_I2C_SDA_GPIO, (int)POST_I2C_SCL_GPIO);
 
-    i2c_master_bus_handle_t bus = nullptr;
+    i2c_config_t cfg = {};
+    cfg.mode = I2C_MODE_MASTER;
+    cfg.sda_io_num = POST_I2C_SDA_GPIO;
+    cfg.scl_io_num = POST_I2C_SCL_GPIO;
+    cfg.sda_pullup_en = GPIO_PULLUP_ENABLE;
+    cfg.scl_pullup_en = GPIO_PULLUP_ENABLE;
+    cfg.master.clk_speed = POST_I2C_FREQ_HZ;
 
-    // Volledig init met {} om alle velden, incl. flags/allow_pd, op 0 te zetten
-    i2c_master_bus_config_t bus_cfg = {};
-    bus_cfg.i2c_port          = POST_I2C_PORT;
-    bus_cfg.sda_io_num        = POST_I2C_SDA_GPIO;
-    bus_cfg.scl_io_num        = POST_I2C_SCL_GPIO;
-    bus_cfg.clk_source        = I2C_CLK_SRC_DEFAULT;
-    bus_cfg.glitch_ignore_cnt = 7;
-    bus_cfg.intr_priority     = 0;
-    bus_cfg.trans_queue_depth = 0;
-    // flags is een sub-struct; we zetten alleen wat we nodig hebben
-    bus_cfg.flags.enable_internal_pullup = true;
-    bus_cfg.flags.allow_pd               = false;  // expliciet, voor de vorm
-
-    esp_err_t err = i2c_new_master_bus(&bus_cfg, &bus);
+    esp_err_t err = i2c_param_config(POST_I2C_PORT, &cfg);
     if (err != ESP_OK) {
-        post_log("I2C: i2c_new_master_bus failed: %s", esp_err_to_name(err));
+        post_log("I2C: i2c_param_config failed: %s", esp_err_to_name(err));
         return;
     }
 
-    bool any_found = false;
+    err = i2c_driver_install(POST_I2C_PORT, cfg.mode, 0, 0, 0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        post_log("I2C: i2c_driver_install failed: %s", esp_err_to_name(err));
+        return;
+    }
 
-    // Volledige 7-bit adresruimte scannen
+    // Scan 7-bit address space
     for (uint8_t addr = 1; addr < 0x7F; ++addr) {
-        err = i2c_master_probe(bus, addr, 20 /* timeout ms */);
-        if (err == ESP_OK) {
+        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+        i2c_master_start(cmd);
+        i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
+        i2c_master_stop(cmd);
+
+        esp_err_t res = i2c_master_cmd_begin(
+            POST_I2C_PORT,
+            cmd,
+            pdMS_TO_TICKS(20)
+        );
+
+        i2c_cmd_link_delete(cmd);
+
+        if (res == ESP_OK) {
             post_log("I2C: found device at 0x%02X", addr);
-            any_found = true;
         }
-        // Andere fouten = geen device → negeren
     }
 
-    if (!any_found) {
-        post_log("I2C: no devices found");
-    }
-
-    i2c_del_master_bus(bus);
+    i2c_driver_delete(POST_I2C_PORT);
 }
 
-
 // -----------------------------------------------------------------------------
-// GPIO checks (optional)
+// GPIO checks (optional, currently just reports configured pins)
 // -----------------------------------------------------------------------------
 
 static void post_test_gpio(void)
@@ -356,7 +496,7 @@ static void post_test_gpio(void)
 }
 
 // -----------------------------------------------------------------------------
-// Modem test helpers
+// Modem test helpers (manual AT over UART1)
 // -----------------------------------------------------------------------------
 
 static bool post_modem_send_at_and_wait_ok(const char *tag_prefix, int attempt)
@@ -392,9 +532,9 @@ static bool post_modem_send_at_and_wait_ok(const char *tag_prefix, int attempt)
     }
 
     if (!ok) {
-        ESP_LOGI(TAG_POST, "%s: no 'OK' yet, retry=%d", tag_prefix, attempt);
+        post_log("%s: no 'OK' yet, retry=%d", tag_prefix, attempt);
     } else {
-        ESP_LOGI(TAG_POST, "%s: got 'OK' from modem", tag_prefix);
+        post_log("%s: got 'OK' from modem", tag_prefix);
     }
 
     return ok;
@@ -402,28 +542,31 @@ static bool post_modem_send_at_and_wait_ok(const char *tag_prefix, int attempt)
 
 static void post_modem_pulse_pwrkey(void)
 {
-    ESP_LOGI(TAG_POST, "MODEM: pulsing PWRKEY (GPIO%d) to start modem", BOARD_MODEM_PWR_PIN);
+    post_log("MODEM: pulsing PWRKEY (GPIO%d) to start modem", BOARD_MODEM_PWR_PIN);
 
+    // SIM7080G PWRKEY pulse: pull low for ~500–800 ms, then high.
     gpio_set_level(BOARD_MODEM_PWR_PIN, 0);
     vTaskDelay(pdMS_TO_TICKS(800));
     gpio_set_level(BOARD_MODEM_PWR_PIN, 1);
 
+    // Give modem time to boot before next AT attempt
     vTaskDelay(pdMS_TO_TICKS(1500));
 }
 
 static void post_test_modem(void)
 {
-    ESP_LOGI(TAG_POST,
-             "MODEM: checking AT response on UART%d (TX=GPIO%d, RX=GPIO%d)",
+    post_log("MODEM: checking AT response on UART%d (TX=GPIO%d, RX=GPIO%d)",
              POST_MODEM_UART_NUM,
              POST_MODEM_TX_GPIO,
              POST_MODEM_RX_GPIO);
 
+    // 1) Ensure modem power rail is up via PMU
     esp_err_t err = post_pmu_enable_modem_rails();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG_POST, "MODEM: PMU configuration failed, modem may stay off");
+        post_log("MODEM: PMU configuration failed, modem may stay off");
     }
 
+    // 2) Configure PWR / DTR / RI pins
     gpio_config_t io = {};
     io.intr_type = GPIO_INTR_DISABLE;
     io.mode = GPIO_MODE_OUTPUT;
@@ -432,6 +575,7 @@ static void post_test_modem(void)
     io.pin_bit_mask = (1ULL << BOARD_MODEM_PWR_PIN) | (1ULL << BOARD_MODEM_DTR_PIN);
     gpio_config(&io);
 
+    // PWRKEY idle high, DTR high (keep modem awake)
     gpio_set_level(BOARD_MODEM_PWR_PIN, 1);
     gpio_set_level(BOARD_MODEM_DTR_PIN, 1);
 
@@ -443,6 +587,7 @@ static void post_test_modem(void)
     ri_cfg.pin_bit_mask = (1ULL << BOARD_MODEM_RI_PIN);
     gpio_config(&ri_cfg);
 
+    // 3) Configure UART1 on TX=5, RX=4
     uart_config_t cfg = {};
     cfg.baud_rate = POST_MODEM_BAUD;
     cfg.data_bits = UART_DATA_8_BITS;
@@ -459,6 +604,7 @@ static void post_test_modem(void)
                  UART_PIN_NO_CHANGE);
     uart_driver_install(POST_MODEM_UART_NUM, 2048, 0, 0, NULL, 0);
 
+    // 4) Try a few plain ATs first (in case modem is already up)
     bool ok = false;
     for (int i = 0; i < POST_MODEM_MAX_RETRY && !ok; ++i) {
         ok = post_modem_send_at_and_wait_ok("MODEM", i);
@@ -467,6 +613,7 @@ static void post_test_modem(void)
         }
     }
 
+    // 5) If still no OK, pulse PWRKEY and try again
     if (!ok) {
         post_modem_pulse_pwrkey();
 
@@ -479,14 +626,14 @@ static void post_test_modem(void)
     }
 
     if (!ok) {
-        ESP_LOGW(TAG_POST, "MODEM: no response after PWRKEY pulse");
+        post_log("MODEM: no response after PWRKEY pulse");
     }
 
     uart_driver_delete(POST_MODEM_UART_NUM);
 }
 
 // -----------------------------------------------------------------------------
-// SD card
+// SD card: write diagnostics buffer to /sdcard/boot_diagnostics.txt
 // -----------------------------------------------------------------------------
 
 static void post_write_to_sd(void)
@@ -495,14 +642,16 @@ static void post_write_to_sd(void)
     sdmmc_card_t *card = nullptr;
 
     esp_vfs_fat_mount_config_t mount_config = {};
-    mount_config.format_if_mount_failed = true;
+    mount_config.format_if_mount_failed = true;   // auto-format if needed
     mount_config.max_files              = 10;
     mount_config.allocation_unit_size   = 16 * 1024;
 
+    // SDMMC host configuration
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
     host.flags = SDMMC_HOST_FLAG_1BIT;
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
 
+    // Slot configuration: 1-bit bus, GPIO matrix
     sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
     slot_config.width = 1;
     slot_config.clk   = POST_SD_CLK_GPIO;
@@ -530,6 +679,7 @@ static void post_write_to_sd(void)
 
     post_log("SD: filesystem mounted, card name: %s", card->cid.name);
 
+    // Write diagnostics buffer
     FILE *f = std::fopen(POST_DIAG_FILE, "w");
     if (!f) {
         post_log("SD: failed to open '%s' for write", POST_DIAG_FILE);
@@ -553,13 +703,15 @@ extern "C" esp_err_t post_run(void)
     post_reset_buffer();
     post_dump_system_info();
 
+    // Board-specific tests
     post_test_i2c();
     post_test_gpio();
     post_test_modem();
 
-    // Optional: PMU / GPIO register dump after modem bring-up
-    pmu_debug_dump();
+    // Extra: dump AXP2101 + GPIO state to console
+    pmu_debug_dump_state();
 
+    // Mirror diagnostics to SD card
     post_write_to_sd();
 
     post_log("=== POST completed ===");
