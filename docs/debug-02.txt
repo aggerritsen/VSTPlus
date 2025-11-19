@@ -1,3 +1,4 @@
+// Working from Arduino development VSTComm
 I (644) PMU_DUMP: ===========================================
 I (644) PMU_DUMP:  PMU / GPIO debug dump (T-SIM7080G-S3)
 I (644) PMU_DUMP: ===========================================

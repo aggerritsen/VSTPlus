@@ -56,6 +56,8 @@ static const char *TAG = "POST";
 #define AXP2101_I2C_ADDR    0x34
 
 // Registers we use
+#define AXP2101_REG_DCDC_ONOFF   0x80   // DCDC enable bits, bit2 = DCDC3
+#define AXP2101_REG_DCDC3_VOLT   0x84   // DCDC3 voltage setting
 #define AXP2101_REG_LDO_ONOFF0   0x90   // LDO ON/OFF control 0, bit5 = BLDO2 enable
 #define AXP2101_REG_BLDO2_VOLT   0x97   // BLDO2 voltage setting
 
@@ -126,6 +128,7 @@ static const post_gpio_test_t s_gpio_tests[] = {
 
 /**
  * Enable BLDO2 at 3.3V to power the SIM7080G modem.
+ * Enable DCDC3 as 3.0V rail for the system / modem.
  * Uses axp2101_*() from pmu_debug.cpp (new i2c_master driver).
  */
 static esp_err_t post_pmu_enable_modem_rails(void)
@@ -158,7 +161,58 @@ static esp_err_t post_pmu_enable_modem_rails(void)
         return err;
     }
 
-    ESP_LOGI(TAG_POST, "PMU: BLDO2 3.3V enabled to power modem (DCDC3 left as configured by bootloader)");
+    // 3) Configure and enable DCDC3 as system / modem rail
+    //    0x66 → 3.00 V (as seen in PMU_DUMP)
+    const uint8_t dcdc3_code = 0x66;
+    uint8_t dcdc_onoff = 0;
+
+    // 3a) Program DCDC3 voltage
+    err = axp2101_write_reg(AXP2101_REG_DCDC3_VOLT, dcdc3_code);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_POST, "PMU: write DCDC3 voltage (0x%02X) failed", AXP2101_REG_DCDC3_VOLT);
+        return err;
+    }
+
+    // 3b) Enable DCDC3 in DCDC ON/OFF register (bit2 = 1)
+    err = axp2101_read_reg(AXP2101_REG_DCDC_ONOFF, &dcdc_onoff);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_POST, "PMU: read DCDC_ONOFF (0x%02X) failed", AXP2101_REG_DCDC_ONOFF);
+        return err;
+    }
+
+    dcdc_onoff |= (1 << 2); // DCDC3 enable
+    err = axp2101_write_reg(AXP2101_REG_DCDC_ONOFF, dcdc_onoff);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_POST, "PMU: write DCDC_ONOFF (0x%02X) failed", AXP2101_REG_DCDC_ONOFF);
+        return err;
+    }
+
+    // 4) Derive “ENABLED / DISABLED” and voltages for log, matching PMU_DUMP style
+
+    // BLDO2: we know we set 0x1C → 3.30 V
+    bool bldo2_enabled = (ldo_onoff0 & (1 << 5)) != 0;
+    unsigned bldo2_mv   = 3300;  // 3.30 V
+
+    // DCDC3: base 1.6 V (0x58), 0.1 V steps → 0x66 = 3.00 V
+    bool dcdc3_enabled  = (dcdc_onoff & (1 << 2)) != 0;
+    unsigned dcdc3_mv   = 1600u + (unsigned)(dcdc3_code - 0x58u) * 100u;
+
+    ESP_LOGI(TAG_POST,
+             "PMU: DCDC3_VOLT (0x%02X) = 0x%02X -> %s, %u.%02u V",
+             AXP2101_REG_DCDC3_VOLT,
+             dcdc3_code,
+             dcdc3_enabled ? "ENABLED" : "DISABLED",
+             dcdc3_mv / 1000,
+             (dcdc3_mv % 1000) / 10);
+
+    ESP_LOGI(TAG_POST,
+             "PMU: BLDO2_VOLT (0x%02X) = 0x%02X -> %s, %u.%02u V",
+             AXP2101_REG_BLDO2_VOLT,
+             bldo2_code_3v3,
+             bldo2_enabled ? "ENABLED" : "DISABLED",
+             bldo2_mv / 1000,
+             (bldo2_mv % 1000) / 10);
+
     return ESP_OK;
 }
 

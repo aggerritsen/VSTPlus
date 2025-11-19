@@ -1,0 +1,5 @@
+CONN FFC BOTTOM 24POS 0.5MM R/A
+F32R-1A7H1-11024
+
+Arducam M0030 OV7670 Camera Module
+Two Million Pixels OV2640 

@@ -17,5 +17,4 @@ idf_component_register(
         esp_timer
         esp_driver_uart
         esp_driver_i2c
-        esp_modem
 )
