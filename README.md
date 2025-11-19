@@ -14,4 +14,6 @@ This development is using Espressif IoT Development Framework IDF (ESP-IDF)
 
 [Configure ESP-IDF](docs/ESP_IDF_Configuration.md)
 
+[POST and Debug Documentation](docs/Post_and_Debug_Documentation.md)
+
 [VTSPlus Development Notes](docs/VSTPlus_Development_Notes.md)
