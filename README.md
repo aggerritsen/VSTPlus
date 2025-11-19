@@ -8,6 +8,7 @@ This development is using Espressif IoT Development Framework IDF (ESP-IDF)
 
 
 ![LilyGO T-SIM7080G-S3 Pinout](docs/Lilygo%20T-SIM7080G-S3%20PINOUT.jpg)
+
 [T-SIM7080G-S3 Pinout](docs/T-SIM7080G-S3_Pinout.md)
 
 ---

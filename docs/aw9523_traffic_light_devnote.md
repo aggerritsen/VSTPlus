@@ -5,6 +5,8 @@
 This document describes the implementation of a **traffic light demo** using the
 **AW9523 I²C LED expander** connected to a **LilyGO T-SIM7080G-S3 (ESP32-S3)** board.
 
+![Adafruit AW9523 Expander](AW9523_Expander.png)
+
 The demo implements:
 
 - A 3‑color traffic light (green, yellow, red) using LED outputs on the AW9523.
