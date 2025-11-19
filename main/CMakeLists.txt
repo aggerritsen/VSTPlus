@@ -3,6 +3,7 @@ idf_component_register(
         "main.cpp"
         "post_diagnostics.cpp"
         "pmu_debug.cpp"
+        "aw9523_traffic_light.cpp"
     INCLUDE_DIRS
         "."
     PRIV_REQUIRES

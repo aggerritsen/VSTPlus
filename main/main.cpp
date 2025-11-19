@@ -4,6 +4,7 @@
 #include "esp_err.h"
 
 #include "post_diagnostics.h"
+#include "aw9523_traffic_light.h"
 
 static const char* TAG = "VSTPlus";
 
@@ -17,8 +18,11 @@ extern "C" void app_main(void)
 
     ESP_LOGI(TAG, "Hello from VSTPlus on ESP32-S3 (C / ESP-IDF)!");
 
-    while (true) {
-        ESP_LOGI(TAG, "Tick...");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    //while (true) {
+    //    ESP_LOGI(TAG, "Tick...");
+    //    vTaskDelay(pdMS_TO_TICKS(1000));
+    //}
+
+    // In plaats van de Tick-loop:
+    aw9523_traffic_light_run();   // blokkeert, eigen while(true) binnenin
 }
