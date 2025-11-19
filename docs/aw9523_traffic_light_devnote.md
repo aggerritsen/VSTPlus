@@ -205,15 +205,12 @@ void aw9523_traffic_light_run(void)
     while (true) {
         ESP_LOGI(TAG, "Traffic light: fade GREEN");
         aw9523_fade_single(PIN_GREEN_LED, step_delay);
-        pmu_log_battery_metrics();
-
+       
         ESP_LOGI(TAG, "Traffic light: fade YELLOW");
         aw9523_fade_single(PIN_YELLOW_LED, step_delay);
-        pmu_log_battery_metrics();
-
+       
         ESP_LOGI(TAG, "Traffic light: fade RED");
         aw9523_fade_single(PIN_RED_LED, step_delay);
-        pmu_log_battery_metrics();
     }
 }
 ```
