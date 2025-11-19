@@ -49,10 +49,9 @@ i2c_new_master_bus(&pmu_bus_cfg, &pmu_bus);
 
 ## 2. I²C Bus 1 — External Sensor Bus (`I2C_NUM_1`)
 
-This bus connects to all **external I²C sensors**, including:
+This bus connects to all **external I²C sensors**, for example:
 
-- BME280  
-- BMP280  
+- BME280/BMP280 0x76  
 - Additional environment monitoring devices  
 
 ### Pin Assignments
@@ -101,7 +100,7 @@ The modem power sequence would fail if PMU I²C were shared or overloaded.
 
 ---
 
-## Summary Diagram (Corrected)
+## Summary Diagram
 
 ```
            +---------------------+
