@@ -1,4 +1,5 @@
-# T-SIM7080G-S3 Technical Documentation
+# POST and Debug Documentation
+The systeem starts off with a Power On Self Test (POST) validating all required functions and a dump of register and main GPIO setting, writing them to a diagnostics logging on a SD card.
 
 ## Architecture of T-SIM7080G-S3
 The T-SIM7080G-S3 integrates an ESP32-S3, AXP2101 PMU, SIM7080G modem, and SD slot. Power rails are controlled by the AXP2101.
